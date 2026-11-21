@@ -15,7 +15,9 @@
 - 拖入文件、批量选文件、导入文件夹，支持中文文件名。
 - 支持 `NSP`、`NSZ`、`XCI`、`XCZ`；提示压缩包、空文件、重名和失效文件。
 - 自动保存文件列表；移除项目不会删除原文件。
-- 显示当前文件已发送的数据量和平均速度，支持停止与断线等待重连。
+- 每个文件单独显示发送进度，完成后标记“已发送”；显示实时速度、预计剩余时间和本次发送汇总。
+- Dock 图标显示进度，发送完成时提醒；支持停止与断线等待重连。
+- 快捷键：⌘O 添加文件，⇧⌘O 添加文件夹，⌘↩ 开始传输，⌘. 停止传输。
 - 内置连接排查说明、诊断日志及日志导出。
 - 自带 Python 和 USB 运行库，成品运行不需要终端、Homebrew 或另装 Python。
 
@@ -86,7 +88,7 @@ python build.py ./release
 
 构建脚本默认查找 `/opt/homebrew/opt/libusb/lib/libusb-1.0.dylib`。可以用 `DBI_LIBUSB_PATH` 指向其他兼容 arm64 动态库；设置此变量时，将对应许可文件作为 `COPYING` 放在该库的上两级目录。
 
-构建输出为 `release/Switch 传输助手.app`。完整参数和组件说明见 [BUILD.txt](BUILD.txt)。
+构建输出为 `release/Switch 传输助手.app` 和 `release/SwitchTransfer-<版本>-macOS26-arm64.dmg`。加 `--no-dmg` 可跳过 DMG；版本号取自 `backend.py` 的 `VERSION`，构建号可用环境变量 `BUILD_NUMBER` 指定。完整参数和组件说明见 [BUILD.txt](BUILD.txt)。
 
 ## 项目结构
 
@@ -97,11 +99,11 @@ python build.py ./release
 | `test_backend.py` | 协议边界、文件分块和服务生命周期测试 |
 | `build.py` | 收集依赖、构建 `.app`、本地签名和自检 |
 | `MakeIcon.swift` | 原生绘制应用图标 |
-| `.github/workflows/tests.yml` | 自动运行协议测试 |
+| `.github/workflows/tests.yml` | 自动运行协议测试和 Swift 类型检查 |
 
 ## 验证状态
 
-本版本包含 17 项协议及服务生命周期测试：中文文件名、分块与偏移、重复读取、越界请求、异常应答、提前 EOF、部分写入、取消、MTP 模式提示和断线重连。
+本版本包含 19 项协议及服务生命周期测试：中文文件名、分块与偏移、重复读取、越界请求、异常应答、提前 EOF、部分写入、取消、MTP 模式提示、断线重连、文件完成事件和实时速度计算。
 
 已在 Apple 芯片 Mac / macOS 26.6.2 检查独立启动、内置 USB 库加载、代码签名完整性、文件夹导入、格式与同名提示、失效文件拦截、重开列表恢复及诊断日志导出。
 

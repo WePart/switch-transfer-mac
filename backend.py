@@ -6,6 +6,7 @@ The GUI communicates through newline-delimited JSON on stdin/stdout.
 """
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -19,9 +20,11 @@ import usb.core
 import usb.util
 import usb.backend.libusb1
 
+VERSION = '1.1.0'
 SUPPORTED = {'.nsp', '.nsz', '.xci', '.xcz'}
 HEADER = struct.Struct('<4sIII')
 CHUNK = 1024 * 1024
+SPEED_WINDOW = 3.0  # seconds of recent transfer used for the live speed
 
 
 class Cancelled(Exception):
@@ -71,6 +74,16 @@ class Protocol:
         self.began = None
         self.last_progress = 0
         self.last_name = None
+        self.completed = set()
+        self.samples = deque()
+
+    def speed(self, now):
+        while len(self.samples) > 1 and now - self.samples[0][0] > SPEED_WINDOW:
+            self.samples.popleft()
+        start, base = self.samples[0]
+        if now - start >= .5:
+            return (self.total_sent - base) / (now - start)
+        return self.total_sent / max(now - self.began, .001)
 
     def check(self):
         if self.stop.is_set():
@@ -144,6 +157,7 @@ class Protocol:
                 chunk = source.read(min(CHUNK, remaining))
                 if not chunk:
                     raise ProtocolError(f'读取文件提前结束，请检查文件是否完整：{name}')
+                self.samples.append((time.monotonic(), self.total_sent))
                 self.write(chunk)
                 self.total_sent += len(chunk)
                 self.ranges[name] = merged_ranges(self.ranges.get(name, []), current, current + len(chunk))
@@ -153,9 +167,12 @@ class Protocol:
                 if now - self.last_progress >= .2 or remaining == 0:
                     sent = sum(b - a for a, b in self.ranges[name])
                     self.emit('progress', name=name, sent=sent, size=file_size,
-                              total_sent=self.total_sent,
-                              speed=self.total_sent / max(now - self.began, .001))
+                              total_sent=self.total_sent, speed=self.speed(now),
+                              avg_speed=self.total_sent / max(now - self.began, .001))
                     self.last_progress = now
+                    if sent >= file_size and name not in self.completed:
+                        self.completed.add(name)
+                        self.emit('file_done', name=name, size=file_size)
 
     def run(self):
         handshake = False
@@ -273,7 +290,7 @@ class Worker:
             self.thread.join(3)
 
     def run(self):
-        self.emit('boot', version='1.0.0', backend='ok')
+        self.emit('boot', version=VERSION, backend='ok')
         threading.Thread(target=self.monitor, daemon=True).start()
         try:
             for line in sys.stdin:
@@ -304,7 +321,7 @@ def main():
         if '--self-check' in sys.argv:
             backend = usb_backend()
             devices = list(usb.core.find(find_all=True, backend=backend))
-            print(json.dumps({'ok': True, 'backend': 'bundled' if getattr(sys, 'frozen', False) else 'system',
+            print(json.dumps({'ok': True, 'version': VERSION, 'backend': 'bundled' if getattr(sys, 'frozen', False) else 'system',
                               'switch_present': any(d.idVendor == 0x057e and d.idProduct == 0x3000 for d in devices)}))
         else:
             Worker().run()

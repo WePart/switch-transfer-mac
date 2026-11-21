@@ -72,6 +72,24 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(self.events[-1][1]['sent'], 140)
         self.assertEqual(self.events[-1][1]['total_sent'], 200)
 
+    def test_file_done_emitted_once_when_every_byte_was_sent(self):
+        size = len(self.content)
+        first, rest, again = self.request(0, 100), self.request(100, size - 100), self.request(0, size)
+        p = self.protocol([first, packet(2, 2), rest, packet(2, 2), again, packet(2, 2)])
+        p.file_range(len(first))
+        self.assertFalse(any(event == 'file_done' for event, _ in self.events))
+        p.file_range(len(rest)); p.file_range(len(again))
+        done = [data for event, data in self.events if event == 'file_done']
+        self.assertEqual(done, [{'name': self.path.name, 'size': size}])
+
+    def test_live_speed_uses_recent_window_not_session_average(self):
+        p = self.protocol([])
+        p.began, p.total_sent = 0.0, 100
+        p.samples.extend([(0.0, 0), (10.0, 0), (11.0, 40)])
+        self.assertEqual(p.speed(12.0), 50)
+        p.samples.clear(); p.samples.append((99.9, 100))
+        self.assertAlmostEqual(p.speed(100.0), 1.0)
+
     def test_out_of_range_fails_before_sending_payload(self):
         req = self.request(len(self.content)-1, 2)
         p = self.protocol([req])

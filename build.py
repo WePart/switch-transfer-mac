@@ -3,12 +3,17 @@ import importlib.metadata
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
 
 source = Path(__file__).resolve().parent
-destination = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else source / 'release'
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
+make_dmg = '--no-dmg' not in sys.argv
+destination = Path(args[0]).resolve() if args else source / 'release'
+version = re.search(r"^VERSION = '([^']+)'", (source/'backend.py').read_text(), re.M).group(1)
+build_number = os.environ.get('BUILD_NUMBER', '2')
 destination.mkdir(parents=True, exist_ok=True)
 app = destination / 'Switch 传输助手.app'
 build = source / 'build'
@@ -35,7 +40,7 @@ shutil.copytree(source/'dist/dbi-worker', resources/'backend', symlinks=True)
 info = {
     'CFBundleName': 'Switch 传输助手', 'CFBundleDisplayName': 'Switch 传输助手',
     'CFBundleIdentifier': 'cn.xion.switchtransfer', 'CFBundleExecutable': 'SwitchTransfer',
-    'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '1.0.0', 'CFBundleVersion': '1',
+    'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': version, 'CFBundleVersion': build_number,
     'CFBundleIconFile': 'AppIcon', 'CFBundleDevelopmentRegion': 'zh_CN',
     'CFBundleLocalizations': ['zh_CN'], 'LSMinimumSystemVersion': '26.0',
     'NSHighResolutionCapable': True, 'NSSupportsAutomaticGraphicsSwitching': True,
@@ -68,3 +73,16 @@ run('codesign', '--force', '--deep', '--sign', '-', app)
 run('codesign', '--verify', '--deep', '--strict', app)
 run(resources/'backend/dbi-worker', '--self-check')
 print(app)
+if make_dmg:
+    dmg = destination / f'SwitchTransfer-{version}-macOS26-arm64.dmg'
+    staging = build / 'dmg'
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    run('ditto', app, staging / app.name)
+    (staging / 'Applications').symlink_to('/Applications')
+    dmg.unlink(missing_ok=True)
+    run('hdiutil', 'create', '-volname', f'Switch 传输助手 {version}', '-srcfolder', staging,
+        '-fs', 'HFS+', '-format', 'UDZO', '-ov', dmg)
+    shutil.rmtree(staging)
+    print(dmg)

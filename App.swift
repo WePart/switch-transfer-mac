@@ -5,6 +5,8 @@ import IOKit.pwr_mgt
 
 private let accent = Color(red: 0.12, green: 0.39, blue: 0.87)
 private let supported: Set<String> = ["nsp", "nsz", "xci", "xcz"]
+private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版"
+private let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
 
 struct PackageFile: Identifiable, Codable, Equatable {
     var id: String { path }
@@ -18,6 +20,13 @@ struct PackageFile: Identifiable, Codable, Equatable {
 
 func bytes(_ value: Int64) -> String {
     ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+}
+
+func duration(_ seconds: Double) -> String {
+    let formatter = DateComponentsFormatter()
+    formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+    formatter.unitsStyle = .positional; formatter.zeroFormattingBehavior = .pad
+    return formatter.string(from: max(0, seconds.rounded())) ?? "--"
 }
 
 final class Model: ObservableObject {
@@ -37,6 +46,11 @@ final class Model: ObservableObject {
     @Published var sent: Int64 = 0
     @Published var total: Int64 = 0
     @Published var speed: Double = 0
+    @Published var sentByFile: [String: Int64] = [:]
+    @Published var completed: Set<String> = []
+    @Published var sessionSent: Int64 = 0
+    @Published var lastProgressAt: Date?
+    private var sessionStartedAt: Date?
     @Published var logs: [String] = []
     @Published var showHelp = false
     @Published var showLogs = false
@@ -64,7 +78,7 @@ final class Model: ObservableObject {
             files = saved
         }
         try? Data().write(to: logURL, options: .atomic)
-        log("应用已启动。版本 1.0.0")
+        log("应用已启动。版本 \(appVersion)（\(appBuild)）")
         if files.contains(where: { !$0.exists }) {
             issue = "部分文件已移动或删除，请移除标红的项目，再重新添加。"
         }
@@ -125,6 +139,7 @@ final class Model: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.process = nil; self.workerReady = false; self.active = false; self.releaseSleep()
+                NSApp.dockTile.badgeLabel = nil
                 if !self.terminating {
                     self.state = "error"; self.status = "传输组件已停止"
                     self.detail = "点击“重新检查”即可重新启动组件。"
@@ -157,8 +172,10 @@ final class Model: ObservableObject {
         case "boot":
             workerReady = true; log("内置 USB 组件已就绪。")
         case "device":
+            let wasPresent = present, previousMode = deviceMode
             present = event["present"] as? Bool ?? false
             deviceMode = event["mode"] as? String ?? "unknown"
+            if !active && ["stopped", "ended"].contains(state) && (wasPresent != present || previousMode != deviceMode) { state = "idle" }
             if !active && ["idle", "error"].contains(state) {
                 status = deviceMode == "mtp" ? "请切换 Switch 的连接模式" : (present ? "Switch 已识别，可以准备传输" : "先连接你的 Switch")
                 detail = deviceMode == "mtp" ? "返回 DBI 主菜单，选择“从 DBIbackend 安装”。" : (present ? "添加安装包后点击“开始传输”，再到 Switch 上选择安装。" : "使用支持数据传输的 USB 线直连 Mac，然后打开 DBI 的后端安装模式。")
@@ -172,7 +189,9 @@ final class Model: ObservableObject {
             case "connected": present = true; status = "DBI 已连接"
             case "ready": status = "请在 Switch 上开始安装"
             case "reconnecting": present = false; status = "连接已中断，等待重连"; speed = 0
-            case "ended": status = "本次连接已结束"; speed = 0
+            case "ended":
+                status = "本次连接已结束"; speed = 0
+                NSApp.requestUserAttention(.informationalRequest)
             default: status = "准备传输"
             }
             log(message)
@@ -183,8 +202,19 @@ final class Model: ObservableObject {
             sent = (event["sent"] as? NSNumber)?.int64Value ?? 0
             total = (event["size"] as? NSNumber)?.int64Value ?? 0
             speed = (event["speed"] as? NSNumber)?.doubleValue ?? 0
+            sessionSent = (event["total_sent"] as? NSNumber)?.int64Value ?? sessionSent
+            sentByFile[currentName] = sent; lastProgressAt = Date()
+            if sessionStartedAt == nil { sessionStartedAt = Date() }
+            NSApp.dockTile.badgeLabel = "\(Int(progress * 100))%"
+        case "file_done":
+            let name = event["name"] as? String ?? ""
+            completed.insert(name); log("发送完成：\(name)")
+            if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
         case "stopped":
-            active = false; releaseSleep(); speed = 0
+            active = false; releaseSleep(); speed = 0; NSApp.dockTile.badgeLabel = nil
+            if let started = sessionStartedAt, sessionSent > 0 {
+                log("本次共发送 \(bytes(sessionSent))，完成 \(completed.count) 个文件，用时 \(duration(Date().timeIntervalSince(started)))。")
+            }
             if !["ended", "error"].contains(state) {
                 state = "stopped"; status = "传输服务已停止"
                 detail = "可以继续添加文件。重新开始前，请在 Switch 退出并重新进入后端安装模式。"
@@ -192,7 +222,7 @@ final class Model: ObservableObject {
             log("传输服务已停止。")
         case "error", "fatal":
             state = "error"; status = "需要处理后再继续"; detail = message; issue = message
-            active = false; releaseSleep()
+            active = false; releaseSleep(); NSApp.dockTile.badgeLabel = nil
             if kind == "fatal" { workerReady = false }
             log(message)
         case "log": log(message)
@@ -295,6 +325,7 @@ final class Model: ObservableObject {
             updated.append(PackageFile(path: file.path, size: size.int64Value))
         }
         files = updated; save(); issue = nil; currentName = ""; sent = 0; total = 0; speed = 0
+        sentByFile = [:]; completed = []; sessionSent = 0; lastProgressAt = nil; sessionStartedAt = nil
         active = true; state = "waiting"; status = "正在启动传输服务…"
         if IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
                                       IOPMAssertionLevel(kIOPMAssertionLevelOn), "Switch USB transfer" as CFString, &assertion) == kIOReturnSuccess { preventSleep = true }
@@ -324,7 +355,7 @@ final class Model: ObservableObject {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "Switch传输诊断.txt"
         panel.message = "日志保存在你选择的位置，不会自动上传。"
         if panel.runModal() == .OK, let url = panel.url {
-            let header = "Switch 传输助手 1.0.0\n系统：\(ProcessInfo.processInfo.operatingSystemVersionString)\nUSB：\(deviceLabel)\n文件数：\(files.count)\n\n"
+            let header = "Switch 传输助手 \(appVersion)（\(appBuild)）\n系统：\(ProcessInfo.processInfo.operatingSystemVersionString)\nUSB：\(deviceLabel)\n文件数：\(files.count)\n\n"
             do { try (header + logs.joined(separator: "\n")).write(to: url, atomically: true, encoding: .utf8) }
             catch { issue = "日志保存失败：\(error.localizedDescription)" }
         }
@@ -355,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var body: some Scene {
         Window("Switch 传输助手", id: "main") {
             MainView().environmentObject(model)
-                .frame(minWidth: 980, minHeight: 760)
+                .frame(minWidth: 920, minHeight: 700)
                 .onOpenURL { model.add([$0]) }
         }
         .defaultSize(width: 1100, height: 800)
@@ -371,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             CommandGroup(replacing: .appInfo) {
                 Button("关于 Switch 传输助手") {
-                    NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Switch 传输助手", .applicationVersion: "1.0.0", .version: "1", .credits: NSAttributedString(string: "适用于 Apple 芯片 Mac 的 DBI USB 传输工具。\n基于 GuangLun2000/DBI-backend-for-switch 与 DBI0 协议。\n原项目：CAI (Hanlin Cai) / dev#Mikami；DBI：duckbill。\n本工具不代表 Nintendo 官方。")])
+                    NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Switch 传输助手", .applicationVersion: appVersion, .version: appBuild, .credits: NSAttributedString(string: "适用于 Apple 芯片 Mac 的 DBI USB 传输工具。\n基于 GuangLun2000/DBI-backend-for-switch 与 DBI0 协议。\n原项目：CAI (Hanlin Cai) / dev#Mikami；DBI：duckbill。\n本工具不代表 Nintendo 官方。")])
                 }
             }
         }
@@ -398,7 +429,7 @@ struct MainView: View {
                 Label("仅通过 USB 传输 · 文件保留在你的 Mac", systemImage: "lock.shield")
                 Spacer()
                 Button("诊断日志") { m.showLogs = true }.buttonStyle(.plain)
-                Text("1.0.0").foregroundStyle(.tertiary)
+                Text(appVersion).foregroundStyle(.tertiary)
             }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.vertical, 12)
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -421,7 +452,7 @@ struct MainView: View {
                 Text(m.deviceLabel).font(.system(size: 12, weight: .medium))
             }.padding(.horizontal, 13).padding(.vertical, 9).background(m.deviceColor.opacity(0.09), in: Capsule())
             Button { m.showHelp = true } label: { Image(systemName: "questionmark.circle").font(.system(size: 20)).foregroundStyle(.secondary) }
-                .buttonStyle(.plain).help("连接与使用帮助")
+                .buttonStyle(.plain).help("连接与使用帮助").accessibilityLabel("连接与使用帮助")
         }.padding(.horizontal, 24).padding(.top, 32).padding(.bottom, 20)
     }
 
@@ -460,7 +491,7 @@ struct MainView: View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
             ScrollView { Text(text).font(.system(size: 12)).lineSpacing(3).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 72)
-            Button { m.issue = nil } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }.buttonStyle(.plain).help("关闭提示")
+            Button { m.issue = nil } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }.buttonStyle(.plain).help("关闭提示").accessibilityLabel("关闭提示")
         }.padding(12).background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -526,10 +557,16 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(file.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle).foregroundStyle(file.exists ? Color.primary : .red)
                 Text(file.exists ? "\(file.type) · \(bytes(file.size))" : "文件已移动、删除或无法读取").font(.system(size: 11)).foregroundStyle(.secondary)
+                if let fileSent = m.sentByFile[file.name], !m.completed.contains(file.name) {
+                    ProgressView(value: Double(fileSent), total: Double(max(file.size, 1))).controlSize(.small).frame(maxWidth: 260)
+                }
             }.help(file.path)
             Spacer(minLength: 8)
-            Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: { Image(systemName: "folder") }.buttonStyle(.plain).help("在访达中显示")
-            Button { m.remove(file) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }.buttonStyle(.plain).disabled(m.active || m.importing).help("从列表移除，不删除原文件")
+            if m.completed.contains(file.name) {
+                Label("已发送", systemImage: "checkmark.circle.fill").font(.system(size: 11, weight: .medium)).foregroundStyle(.green)
+            }
+            Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: { Image(systemName: "folder") }.buttonStyle(.plain).help("在访达中显示").accessibilityLabel("在访达中显示 \(file.name)")
+            Button { m.remove(file) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }.buttonStyle(.plain).disabled(m.active || m.importing).help("从列表移除，不删除原文件").accessibilityLabel("移除 \(file.name)")
         }.padding(.horizontal, 18).padding(.vertical, 11)
     }
 
@@ -548,11 +585,19 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(m.currentName).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
                     ProgressView(value: m.progress)
-                    HStack {
-                        Text("已发送 \(bytes(m.sent)) / \(bytes(m.total))")
-                        Spacer()
-                        Text(m.speed > 0 ? "平均 \(bytes(Int64(m.speed)))/秒" : "传输已暂停或结束")
-                    }.font(.system(size: 10)).foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let stalled = m.lastProgressAt.map { context.date.timeIntervalSince($0) > 3 } ?? true
+                        HStack {
+                            Text("已发送 \(bytes(m.sent)) / \(bytes(m.total)) · \(Int(m.progress * 100))%")
+                            Spacer()
+                            if !m.active || m.speed <= 0 { Text("传输已暂停或结束") }
+                            else if stalled { Text("等待 Switch 请求数据…") }
+                            else { Text("\(bytes(Int64(m.speed)))/秒 · 剩余约 \(duration(Double(max(0, m.total - m.sent)) / m.speed))") }
+                        }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    if m.sessionSent > 0 {
+                        Text("本次共发送 \(bytes(m.sessionSent))\(m.completed.isEmpty ? "" : "，已完整发送 \(m.completed.count) 个文件")").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                     Text("此进度表示电脑已发送的文件数据，不代表 Switch 已完成安装。").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
             }
@@ -560,10 +605,10 @@ struct MainView: View {
                 Button("重新检查") { m.refresh() }.disabled(m.active)
                 Spacer()
                 if m.active {
-                    Button("停止传输") { m.stop() }.buttonStyle(.bordered).controlSize(.large)
+                    Button("停止传输") { m.stop() }.buttonStyle(.bordered).controlSize(.large).keyboardShortcut(".", modifiers: .command)
                 } else {
                     Button { m.start() } label: { Label("开始传输", systemImage: "arrow.up.right").frame(minWidth: 112) }
-                        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!m.canStart)
+                        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!m.canStart).keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }.padding(18).background(accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
@@ -587,7 +632,7 @@ struct HelpView: View {
                     help("6. 显示发送完成，就安装好了吗？", "这里的进度是电脑已发送的文件数据。Switch 还会处理和验证文件，最终是否安装成功请以 Switch 屏幕为准。")
                     help("文件与隐私", "文件列表保存在本机，下次启动会自动恢复。清空列表只会移除记录，不会删除文件。应用不会上传文件或日志。日志仅在你点击“导出”并选择位置时保存一份副本。")
                     Divider()
-                    Text("Switch 传输助手 1.0.0 · Apple 芯片 Mac\n基于 DBI0 协议与 GuangLun2000/DBI-backend-for-switch 改进。原项目：CAI (Hanlin Cai)、dev#Mikami；DBI：duckbill。").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Switch 传输助手 \(appVersion) · Apple 芯片 Mac\n基于 DBI0 协议与 GuangLun2000/DBI-backend-for-switch 改进。原项目：CAI (Hanlin Cai)、dev#Mikami；DBI：duckbill。").font(.system(size: 11)).foregroundStyle(.secondary)
                     Link("查看原项目", destination: URL(string: "https://github.com/GuangLun2000/DBI-backend-for-switch")!)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }

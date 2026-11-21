@@ -11,6 +11,10 @@ Python 环境安装 requirements-build.txt 后执行：
 python -m unittest -v test_backend
 python build.py /绝对路径/交付目录
 
+输出 .app 和 SwitchTransfer-<版本>-macOS26-arm64.dmg；加 --no-dmg 跳过 DMG。
+版本号只在 backend.py 的 VERSION 中维护，界面从 Info.plist 读取。
+构建号用环境变量 BUILD_NUMBER 指定（默认 2）。
+
 默认从 /opt/homebrew/opt/libusb/lib/libusb-1.0.dylib 收集 libusb。
 可通过环境变量 DBI_LIBUSB_PATH 指向其他兼容 arm64 动态库。
 运行成品不需要 Homebrew、Python 或网络。
