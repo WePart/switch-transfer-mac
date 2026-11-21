@@ -1,0 +1,24 @@
+Switch 传输助手 1.0.0
+
+Original project: https://github.com/GuangLun2000/DBI-backend-for-switch
+Original project author: CAI (Hanlin Cai), https://caihanlin.com/
+Original project credits: dev#Mikami, https://github.com/sskyNS
+DBI / DBI0 protocol reference: https://github.com/rashevskyv/dbi (duckbill)
+Reference revision of GuangLun2000/DBI-backend-for-switch:
+31a521053917f77236dd6f1a231e019f00dc11b3
+
+This local application provides a native macOS interface and an independently
+structured DBI0 USB worker. It is not affiliated with Nintendo. No games, keys,
+firmware or console software are included. Upstream does not supply a standard
+license grant in the inspected revision; do not infer a redistribution license.
+
+Runtime components:
+- Python 3.12.14: PSF License; https://www.python.org/
+- PyUSB 1.3.1: BSD 3-Clause; https://github.com/pyusb/pyusb
+- libusb 1.0.30: LGPL 2.1 or later; https://libusb.info/
+  Source: https://github.com/libusb/libusb/releases/tag/v1.0.30
+  Linked dynamically; the library may be replaced with a compatible arm64 build.
+- PyInstaller 6.22.3 bootloader: GPL with bootloader exception;
+  https://pyinstaller.org/en/stable/license.html
+
+Included license files apply to their respective components.

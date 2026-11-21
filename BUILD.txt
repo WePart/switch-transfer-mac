@@ -1,0 +1,25 @@
+Switch 传输助手：本地构建说明
+
+App.swift：SwiftUI 原生界面、文件选择、进程通信和本地状态。
+backend.py：DBI0 USB 工作进程，只通过标准输入/输出与界面通信。
+test_backend.py：协议边界、传输字节、Unicode 文件名和取消测试。
+MakeIcon.swift：应用图标的原生矢量绘制。
+build.py：生成独立的 arm64 .app，并做本地 ad-hoc 签名。
+
+构建环境：Apple Silicon Mac、Apple Command Line Tools、Python 3.12、libusb。
+Python 环境安装 requirements-build.txt 后执行：
+python -m unittest -v test_backend
+python build.py /绝对路径/交付目录
+
+默认从 /opt/homebrew/opt/libusb/lib/libusb-1.0.dylib 收集 libusb。
+可通过环境变量 DBI_LIBUSB_PATH 指向其他兼容 arm64 动态库。
+运行成品不需要 Homebrew、Python 或网络。
+
+此包为 Apple Silicon / macOS 26 及以上版本构建；实际验证系统是 macOS 26.6.2。
+内置 libusb 的最低系统是 macOS 26，因此没有宣称兼容旧版 macOS。
+成品采用本地 ad-hoc 签名，未进行 Apple Developer ID 签名或公证。
+协议模拟测试通过不能替代真实 Switch 的传输与安装验证。
+
+数据位置：~/Library/Application Support/SwitchTransfer/
+files.json 保存本机选择的文件路径；last-session.log 保存最近会话诊断。
+应用没有网络请求，不收集或上传文件及日志。
