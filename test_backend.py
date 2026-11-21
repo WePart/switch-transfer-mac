@@ -192,5 +192,66 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(release.call_count, 2)
 
 
+    def backend_device(self):
+        class Interface:
+            bInterfaceClass = 255
+        class Device:
+            def get_active_configuration(self): return [Interface()]
+        return Device()
+
+    def serve_sessions(self, keep_serving, on_run):
+        worker_files = []
+        with patch.object(b, 'usb_backend', return_value=object()), patch.object(b.usb.core, 'find', side_effect=lambda **_: self.backend_device()), patch.object(b.usb.util, 'dispose_resources'):
+            worker = b.Worker()
+            worker.emit = lambda event, **data: self.events.append((event, data))
+            def run(protocol):
+                worker_files.append(dict(protocol.files)); on_run(worker, len(worker_files))
+            with patch.object(b.Protocol, 'run', autospec=True, side_effect=run), patch.object(worker.stop_event, 'wait', return_value=False):
+                worker.serve({self.path.name: self.path}, keep_serving)
+        return worker_files
+
+    def test_without_keep_serving_stops_after_one_session(self):
+        runs = self.serve_sessions(False, lambda worker, n: None)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(self.events[-1][0], 'stopped')
+
+    def test_keep_serving_waits_for_next_batch_until_stopped(self):
+        runs = self.serve_sessions(True, lambda worker, n: n == 3 and worker.stop_event.set())
+        self.assertEqual(len(runs), 3)
+        messages = [data['message'] for event, data in self.events if data.get('state') == 'handshake']
+        self.assertIn('第 1 批已结束', messages[1])
+        self.assertEqual(self.events[-1][0], 'stopped')
+
+    def test_update_applies_to_next_session(self):
+        other = self.root / 'next.xci'; other.write_bytes(b'x')
+        def on_run(worker, n):
+            if n == 1: worker.handle({'command': 'update', 'paths': [str(other)]})
+            if n == 2: worker.stop_event.set()
+        runs = self.serve_sessions(True, on_run)
+        self.assertEqual([list(r) for r in runs], [[self.path.name], ['next.xci']])
+
+    def test_update_before_dbi_requests_list_applies_to_current_session(self):
+        other = self.root / 'next.xci'; other.write_bytes(b'x')
+        with patch.object(b, 'usb_backend', return_value=object()):
+            worker = b.Worker()
+        worker.emit = lambda event, **data: self.events.append((event, data))
+        worker.thread = threading.Thread(target=self.stop.wait); worker.thread.start()
+        worker.protocol = p = self.protocol([packet(0, 3), packet(2, 3), packet(0, 0)])
+        worker.handle({'command': 'update', 'paths': [str(other)]})
+        p.run()
+        self.stop.set(); worker.thread.join()
+        self.assertEqual(self.device.writes[1], b'next.xci\n')
+        self.assertIn('请求列表时', [d['message'] for e, d in self.events if e == 'log'][0])
+
+    def test_invalid_update_keeps_previous_list(self):
+        with patch.object(b, 'usb_backend', return_value=object()):
+            worker = b.Worker()
+        worker.emit = lambda event, **data: self.events.append((event, data))
+        worker.files = {self.path.name: self.path}
+        worker.handle({'command': 'update', 'paths': []})
+        self.assertEqual(self.events[-1][0], 'update_error')
+        self.assertEqual(list(worker.files), [self.path.name])
+
+
 if __name__ == '__main__':
     unittest.main()

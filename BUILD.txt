@@ -1,6 +1,6 @@
 Switch 传输助手：本地构建说明
 
-App.swift：SwiftUI 原生界面、文件选择、进程通信和本地状态。
+Sources/*.swift：SwiftUI 原生界面（App 入口、Model 状态与进程通信、MainView 主窗口、Components 组件、Panels 面板）。
 backend.py：DBI0 USB 工作进程，只通过标准输入/输出与界面通信。
 test_backend.py：协议边界、传输字节、Unicode 文件名和取消测试。
 MakeIcon.swift：应用图标的原生矢量绘制。
@@ -25,5 +25,5 @@ python build.py /绝对路径/交付目录
 协议模拟测试通过不能替代真实 Switch 的传输与安装验证。
 
 数据位置：~/Library/Application Support/SwitchTransfer/
-files.json 保存本机选择的文件路径；last-session.log 保存最近会话诊断。
+files.json 保存本机选择的文件路径；history.json 保存传输记录；last-session.log 保存最近会话诊断。
 应用没有网络请求，不收集或上传文件及日志。

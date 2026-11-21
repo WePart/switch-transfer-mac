@@ -25,8 +25,9 @@ def run(*args):
 run(sys.executable, '-m', 'PyInstaller', '--noconfirm', '--onedir', '--name', 'dbi-worker',
     '--distpath', source/'dist', '--workpath', build, '--specpath', source,
     '--add-binary', f'{libusb}:.', '--hidden-import', 'usb.backend.libusb1', source/'backend.py')
-run('swiftc', '-parse-as-library', '-O', '-target', 'arm64-apple-macosx14.0', source/'App.swift',
-    '-o', source/'SwitchTransfer', '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'IOKit')
+run('swiftc', '-parse-as-library', '-O', '-target', 'arm64-apple-macosx26.0', *sorted((source/'Sources').glob('*.swift')),
+    '-o', source/'SwitchTransfer', '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'IOKit',
+    '-framework', 'UserNotifications')
 run('swift', source/'MakeIcon.swift', source/'AppIcon.iconset')
 run('iconutil', '-c', 'icns', source/'AppIcon.iconset', '-o', source/'AppIcon.icns')
 if app.exists():

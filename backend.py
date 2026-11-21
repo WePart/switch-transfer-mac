@@ -20,7 +20,7 @@ import usb.core
 import usb.util
 import usb.backend.libusb1
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 SUPPORTED = {'.nsp', '.nsz', '.xci', '.xcz'}
 HEADER = struct.Struct('<4sIII')
 CHUNK = 1024 * 1024
@@ -76,6 +76,7 @@ class Protocol:
         self.last_name = None
         self.completed = set()
         self.samples = deque()
+        self.listed = False
 
     def speed(self, now):
         while len(self.samples) > 1 and now - self.samples[0][0] > SPEED_WINDOW:
@@ -118,6 +119,7 @@ class Protocol:
             raise ProtocolError('DBI 应答异常，请确认 Switch 已进入“从 DBIbackend 安装”。')
 
     def list_files(self):
+        self.listed = True
         payload = ''.join(name + '\n' for name in self.files).encode('utf-8')
         self.header(1, 3, len(payload))
         if payload:
@@ -222,6 +224,8 @@ class Worker:
         self.quit_event = threading.Event()
         self.usb_lock = threading.Lock()
         self.thread = None
+        self.files = {}
+        self.protocol = None
         self.backend = usb_backend()
 
     def emit(self, event, **values):
@@ -249,7 +253,9 @@ class Worker:
                 self.emit('device', present=False, mode='error', message=error_message(error))
             self.quit_event.wait(2)
 
-    def serve(self, files):
+    def serve(self, files, keep_serving=False):
+        self.files = files
+        batches = 0
         try:
             while not self.stop_event.is_set():
                 device = None
@@ -266,9 +272,16 @@ class Worker:
                     cfg = device.get_active_configuration()
                     if any(i.bInterfaceClass == 6 for i in cfg):
                         raise ProtocolError('当前是 MTP 模式。请在 Switch 返回 DBI 主菜单，选择“从 DBIbackend 安装”。')
-                    self.emit('state', state='handshake', message='已检测到 Switch，等待 DBI 请求文件列表。')
-                    Protocol(device, files, self.stop_event, self.emit).run()
-                    break
+                    self.emit('state', state='handshake', message=(
+                        f'第 {batches} 批已结束。在 Switch 再次进入“从 DBIbackend 安装”即可安装下一批。' if batches
+                        else '已检测到 Switch，等待 DBI 请求文件列表。'))
+                    # Each session reads the current list so `update` applies to the next batch.
+                    self.protocol = Protocol(device, self.files, self.stop_event, self.emit)
+                    self.protocol.run()
+                    batches += 1
+                    if not keep_serving:
+                        break
+                    self.stop_event.wait(1)
                 except usb.core.USBError as error:
                     if self.stop_event.is_set():
                         break
@@ -289,6 +302,38 @@ class Worker:
         if self.thread:
             self.thread.join(3)
 
+    def handle(self, command):
+        try:
+            if command['command'] == 'start':
+                if self.thread and self.thread.is_alive():
+                    raise ValueError('传输服务仍在运行，请先停止。')
+                files = catalog(command['paths'])
+                self.stop_event.clear()
+                self.thread = threading.Thread(target=self.serve, args=(files, bool(command.get('keep_serving'))), daemon=True)
+                self.thread.start()
+            elif command['command'] == 'update':
+                try:
+                    self.files = catalog(command['paths'])
+                except Exception as error:
+                    # The service keeps running with the previous list.
+                    self.emit('update_error', message=error_message(error))
+                else:
+                    protocol = self.protocol
+                    if protocol is not None and not protocol.listed and self.thread and self.thread.is_alive():
+                        # DBI has not asked for the list yet, so this session can still use the new one.
+                        protocol.files = self.files
+                        self.emit('log', message=f'文件列表已更新为 {len(self.files)} 个，Switch 请求列表时即可看到。')
+                    else:
+                        self.emit('log', message=f'文件列表已更新为 {len(self.files)} 个，Switch 下次进入后端时生效。')
+            elif command['command'] == 'stop':
+                self.stop()
+            elif command['command'] == 'probe':
+                self.probe()
+            elif command['command'] == 'quit':
+                return 'quit'
+        except Exception as error:
+            self.emit('error', message=error_message(error))
+
     def run(self):
         self.emit('boot', version=VERSION, backend='ok')
         threading.Thread(target=self.monitor, daemon=True).start()
@@ -296,21 +341,11 @@ class Worker:
             for line in sys.stdin:
                 try:
                     command = json.loads(line)
-                    if command['command'] == 'start':
-                        if self.thread and self.thread.is_alive():
-                            raise ValueError('传输服务仍在运行，请先停止。')
-                        files = catalog(command['paths'])
-                        self.stop_event.clear()
-                        self.thread = threading.Thread(target=self.serve, args=(files,), daemon=True)
-                        self.thread.start()
-                    elif command['command'] == 'stop':
-                        self.stop()
-                    elif command['command'] == 'probe':
-                        self.probe()
-                    elif command['command'] == 'quit':
-                        break
-                except Exception as error:
-                    self.emit('error', message=error_message(error))
+                except ValueError:
+                    self.emit('error', message='收到无法识别的指令。')
+                    continue
+                if self.handle(command) == 'quit':
+                    break
         finally:
             self.quit_event.set()
             self.stop()
