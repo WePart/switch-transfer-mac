@@ -4,9 +4,9 @@
 
 面向中文用户的 Mac 原生 DBI USB 传输工具。连接 Switch、添加安装包、开始传输，整个流程在一个窗口完成。
 
-**[下载 v1.2.0 公开预览版](https://github.com/WePart/switch-transfer-mac/releases/tag/v1.2.0)** · [构建说明](BUILD.txt) · [反馈问题](https://github.com/WePart/switch-transfer-mac/issues)
+**[下载 v1.2.0](https://github.com/WePart/switch-transfer-mac/releases/tag/v1.2.0)** · [构建说明](BUILD.txt) · [反馈问题](https://github.com/WePart/switch-transfer-mac/issues)
 
-> 当前安装包适用于 **Apple 芯片 Mac，macOS 26 或更新版本**。已完成协议模拟和 Mac 界面检查；真实 Switch 的完整传输与安装仍待验证。
+> 当前安装包适用于 **Apple 芯片 Mac，macOS 26 或更新版本**。已在真实 Switch 上完成传输与安装验证。
 
 ## 功能
 
@@ -115,7 +115,7 @@ python build.py ./release
 
 已在 Apple 芯片 Mac / macOS 26.6.2 检查独立启动、内置 USB 库加载、代码签名完整性、文件夹导入、格式与同名提示、失效文件拦截、重开列表恢复及诊断日志导出。
 
-这些验证不等同于真实 Switch 传输成功。本次公开版本标记为预览版，欢迎提交具体设备与 DBI 版本的测试反馈。
+1.2.0 已在真实 Switch 上完成传输与安装验证。不同 Mac、数据线和 DBI 版本的表现可能不同，欢迎提交具体设备与 DBI 版本的测试反馈。
 
 ## 来源与许可
 
