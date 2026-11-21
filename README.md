@@ -4,7 +4,7 @@
 
 面向中文用户的 Mac 原生 DBI USB 传输工具。连接 Switch、添加安装包、开始传输，整个流程在一个窗口完成。
 
-**[下载 v1.0.0 公开预览版](https://github.com/WePart/switch-transfer-mac/releases/tag/v1.0.0)** · [构建说明](BUILD.txt) · [反馈问题](https://github.com/WePart/switch-transfer-mac/issues)
+**[下载 v1.2.0 公开预览版](https://github.com/WePart/switch-transfer-mac/releases/tag/v1.2.0)** · [构建说明](BUILD.txt) · [反馈问题](https://github.com/WePart/switch-transfer-mac/issues)
 
 > 当前安装包适用于 **Apple 芯片 Mac，macOS 26 或更新版本**。已完成协议模拟和 Mac 界面检查；真实 Switch 的完整传输与安装仍待验证。
 
@@ -25,7 +25,7 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/WePart/switch-transfer-mac/releases) 下载 `SwitchTransfer-1.0.0-macOS26-arm64.dmg`。
+1. 在 [Releases](https://github.com/WePart/switch-transfer-mac/releases) 下载 `SwitchTransfer-1.2.0-macOS26-arm64.dmg`。
 2. 打开 DMG，把 **Switch 传输助手** 拖入 **应用程序**。
 3. 在“应用程序”中双击打开。
 
